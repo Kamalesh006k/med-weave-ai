@@ -127,3 +127,7 @@ body {
 .dept-neurology { background-color: #F5F3FF; color: #7C3AED; border-color: #EDE9FE; }
 .dept-oncology { background-color: #ECFDF5; color: #059669; border-color: #D1FAE5; }
 .dept-pediatrics { background-color: #FFFBEB; color: #D97706; border-color: #FEF3C7; }
+
+/* Hide Scrollbar */
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }

@@ -26,6 +26,7 @@ export default function ConsultationRoom() {
   const [prescriptionResult, setPrescriptionResult] = useState(null);
   const [verifyingPrescription, setVerifyingPrescription] = useState(false);
   const [sessionCompleted, setSessionCompleted] = useState(false);
+  const [activeTab, setActiveTab] = useState('live');
   const [isInitialized, setIsInitialized] = useState(false);
   const recognitionRef = useRef(null);
   const autoStartRef = useRef(false);
@@ -167,8 +168,8 @@ export default function ConsultationRoom() {
               setDiarizedTranscript(res.diarized_text);
             }
           } catch (e) {
-            console.error("Realtime API check failed", e);
-            setRealtimeWarning("SAFE");
+            // Silently recover — a network blip shouldn't interrupt the session
+            console.warn("Realtime check unavailable:", e?.message || e);
           }
         }
       }, 5000); 
@@ -300,6 +301,35 @@ export default function ConsultationRoom() {
     }
   };
 
+  const handleEndSession = async () => {
+    // 1. Stop recording
+    if (isRecording) {
+      try { recognitionRef.current?.stop(); } catch(e) {}
+      setIsRecording(false);
+    }
+    // 2. Get full transcript
+    const finalInput = transcript + (interimTranscript ? interimTranscript : '');
+    if (!finalInput.trim()) {
+      setToast({ message: "No clinical data captured. Start dictation first.", type: 'error' });
+      return;
+    }
+    // 3. Run AI analysis (saves to DB via backend)
+    setLoading(true);
+    try {
+      const result = await consultationService.analyze(id, finalInput);
+      setAnalysis(result.ai_analysis);
+      fetchPatientData();
+      setPerspective('doctor');
+      setActiveTab('report');
+      setChatLog([{ role: 'ai', content: 'Session ended. Please review the summary and upload your prescription below.' }]);
+      setToast({ message: "Session analysis complete. Please upload your prescription.", type: 'success' });
+    } catch (err) {
+      setToast({ message: 'Clinical analysis failed. Please try again.', type: 'error' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   if (!patient) return (
     <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-8">
         <div className="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin mb-4" />
@@ -337,16 +367,33 @@ export default function ConsultationRoom() {
               <p className="text-sm text-red-600 font-bold">{patient.allergies || "No Reported Conflicts"}</p>
             </div>
             <div className="text-right border-l border-slate-200 pl-6 hidden md:block">
-              <p className="medical-label mb-0.5">Active Medications</p>
               <p className="text-sm text-indigo-600 font-bold">{patient.medications || "None Recorded"}</p>
             </div>
           </div>
         </div>
       </header>
 
-      <main className="flex-1 max-w-7xl mx-auto w-full grid grid-cols-1 lg:grid-cols-12 gap-0 relative z-10 overflow-hidden">
-        {/* Input Feed & Session History */}
-        <div className="lg:col-span-7 border-r border-slate-200 flex flex-col p-8 overflow-y-auto max-h-[calc(100vh-73px)]">
+      <main className="flex-1 max-w-7xl mx-auto w-full flex flex-col relative z-10 overflow-hidden">
+        {/* Navigation Bar */}
+        <div className="flex items-center justify-center p-4 border-b border-slate-200 bg-white">
+          <div className="flex bg-slate-100 p-1 rounded-xl">
+            <button 
+                onClick={() => setActiveTab('live')}
+                className={`flex items-center gap-2 px-6 py-2.5 rounded-lg text-xs font-bold transition-all ${activeTab === 'live' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+            >
+                <Activity size={14} /> Live Clinic
+            </button>
+            <button 
+                onClick={() => setActiveTab('report')}
+                className={`flex items-center gap-2 px-6 py-2.5 rounded-lg text-xs font-bold transition-all ${activeTab === 'report' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+            >
+                <Brain size={14} /> Clinical Report
+            </button>
+          </div>
+        </div>
+
+        {activeTab === 'live' && (
+          <div className="w-full flex flex-col p-8 overflow-y-auto max-h-[calc(100vh-140px)]">
           <div className="mb-8">
             <div className="flex justify-between items-center mb-4">
                 <label className="medical-label flex items-center gap-2">
@@ -429,7 +476,7 @@ export default function ConsultationRoom() {
                 </div>
             )}
             
-            <div className="w-full h-[500px] bg-white border border-slate-200 rounded-2xl p-6 shadow-inner overflow-y-auto mb-4 relative">
+            <div className="w-full h-[500px] bg-white border border-slate-200 rounded-2xl p-6 shadow-inner overflow-y-auto no-scrollbar mb-4 relative">
               {diarizedTranscript || transcript ? (
                 <div className="space-y-6">
                   {/* Show Diarized Part */}
@@ -499,6 +546,28 @@ export default function ConsultationRoom() {
                     </div>
                 )}
             </div>
+
+            {/* End Session Button — visible when there's transcript but no analysis yet */}
+            {(transcript.trim() || diarizedTranscript.trim()) && !analysis && (
+                <div className="mt-6">
+                    <button 
+                        onClick={handleEndSession}
+                        disabled={loading}
+                        className={`w-full py-4 rounded-2xl text-[11px] font-black uppercase tracking-[0.2em] transition-all shadow-xl flex items-center justify-center gap-3 ${
+                            loading 
+                            ? 'bg-slate-100 text-slate-400 cursor-wait shadow-none' 
+                            : 'bg-red-600 text-white hover:bg-red-700 shadow-red-100 hover:scale-[1.02]'
+                        }`}
+                    >
+                        {loading ? (
+                            <><Loader2 size={16} className="animate-spin" /> Generating Summary...</>
+                        ) : (
+                            <><MicOff size={16} /> End Session & Generate Summary</>
+                        )}
+                    </button>
+                    <p className="text-center text-[9px] text-slate-400 font-medium mt-2">This will stop recording, generate the AI summary, and prompt you to upload your prescription.</p>
+                </div>
+            )}
           </div>
 
           <div className="flex-1 pt-8 border-t border-slate-100">
@@ -546,10 +615,12 @@ export default function ConsultationRoom() {
               ))}
             </div>
           </div>
-        </div>
+          </div>
+        )}
 
         {/* Intelligence Output Interface */}
-        <div className="lg:col-span-5 bg-white/50 backdrop-blur-sm p-8 overflow-y-auto max-h-[calc(100vh-73px)] relative flex flex-col">
+        {activeTab === 'report' && (
+          <div className="w-full bg-white/50 backdrop-blur-sm p-8 overflow-y-auto max-h-[calc(100vh-140px)] relative flex flex-col">
           <div className="flex items-center justify-between mb-8 border-b border-slate-100 pb-4">
               <div className="flex items-center gap-2">
                   <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center text-white shadow-md">
@@ -630,10 +701,10 @@ export default function ConsultationRoom() {
                     </div>
 
                     {/* Doctor Summary */}
-                    <div className="clinical-card bg-slate-900 text-white p-6 shadow-xl shadow-slate-200 border-none relative overflow-hidden group">
-                        <div className="absolute top-0 right-0 p-3 opacity-10 group-hover:opacity-20 transition-opacity"><Brain size={48} /></div>
-                        <h4 className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-3">Diagnostic Synthesis</h4>
-                        <p className="text-sm leading-relaxed text-slate-100 font-medium whitespace-pre-wrap">
+                    <div className="clinical-card p-6 relative overflow-hidden group">
+                        <div className="absolute top-0 right-0 p-3 opacity-5 group-hover:opacity-10 transition-opacity text-indigo-600"><Brain size={48} /></div>
+                        <h4 className="text-[10px] font-black text-indigo-600 uppercase tracking-widest mb-3">Diagnostic Synthesis</h4>
+                        <p className="text-sm leading-relaxed text-slate-900 font-medium whitespace-pre-wrap">
                         {analysis.summary}
                         </p>
                     </div>
@@ -826,8 +897,8 @@ export default function ConsultationRoom() {
                   </form>
               </div>
           )}
-
         </div>
+        )}
       </main>
 
       {/* Toast Notification */}

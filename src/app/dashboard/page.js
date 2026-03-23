@@ -346,15 +346,21 @@ export default function Dashboard() {
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={() => setIsModalOpen(false)} />
-          <div className="bg-white rounded-[2.5rem] p-8 w-full max-w-xl relative animate-in zoom-in-95 duration-200 border border-white/20 shadow-2xl overflow-y-auto max-h-[90vh]">
+          <div className="bg-white rounded-[2.5rem] p-8 w-full max-w-xl relative animate-in zoom-in-95 duration-200 border border-white/20 shadow-2xl overflow-y-auto no-scrollbar max-h-[90vh]">
             <div className="flex items-center gap-3 mb-8">
                 <div className="w-12 h-12 bg-indigo-600 rounded-2xl flex items-center justify-center text-white shadow-xl shadow-indigo-100">
                     <UserPlus size={24} />
                 </div>
-                <div>
+                <div className="flex-1">
                     <h2 className="text-2xl font-black text-slate-900 leading-none">Manual Patient Entry</h2>
                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-2">Fill in the clinical details manually.</p>
                 </div>
+                <button 
+                    onClick={() => setIsModalOpen(false)}
+                    className="p-3 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-2xl transition-all"
+                >
+                    <Plus size={24} className="rotate-45" />
+                </button>
             </div>
 
 
@@ -479,7 +485,7 @@ export default function Dashboard() {
       {viewingPatient && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={() => setViewingPatient(null)} />
-          <div className="bg-white rounded-[2.5rem] p-8 w-full max-w-xl relative animate-in zoom-in-95 duration-200 border border-white/20 shadow-2xl overflow-y-auto max-h-[90vh]">
+          <div className="bg-white rounded-[2.5rem] p-8 w-full max-w-xl relative animate-in zoom-in-95 duration-200 border border-white/20 shadow-2xl overflow-y-auto no-scrollbar max-h-[90vh]">
             <div className="flex items-center justify-between mb-8">
                 <div className="flex items-center gap-3">
                     <div className={`w-2 h-2 rounded-full ${

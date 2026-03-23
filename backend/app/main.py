@@ -217,23 +217,27 @@ def chat_copilot(chat: schemas.ChatMessage, current_doctor: models.Doctor = Depe
 
 @app.post("/realtime_check", response_model=schemas.RealtimeCheckResponse)
 def realtime_check(request: schemas.RealtimeCheckRequest, current_doctor: models.Doctor = Depends(get_current_doctor), db: Session = Depends(get_db)):
-    patient = db.query(models.Patient).filter(models.Patient.id == request.patient_id, models.Patient.doctor_id == current_doctor.id).first()
-    if not patient:
-        raise HTTPException(status_code=404, detail="Patient not found")
-    
-    # Fetch historical summaries for real-time watchdog
-    prev_sessions = db.query(models.Consultation).filter(models.Consultation.patient_id == patient.id).order_by(models.Consultation.created_at.desc()).limit(2).all()
-    history_summaries = "\n".join([f"Prev Session: {s.ai_analysis.get('summary', '')}" for s in prev_sessions if s.ai_analysis])
+    try:
+        patient = db.query(models.Patient).filter(models.Patient.id == request.patient_id, models.Patient.doctor_id == current_doctor.id).first()
+        if not patient:
+            return schemas.RealtimeCheckResponse(warning="SAFE", diarized_text=request.transcript)
+        
+        # Fetch historical summaries for real-time watchdog
+        prev_sessions = db.query(models.Consultation).filter(models.Consultation.patient_id == patient.id).order_by(models.Consultation.created_at.desc()).limit(2).all()
+        history_summaries = "\n".join([f"Prev Session: {s.ai_analysis.get('summary', '')}" for s in prev_sessions if s.ai_analysis])
 
-    history_text = f"Profile History: {security.decrypt_data(patient.encrypted_history)}\nAllergies: {security.decrypt_data(patient.encrypted_allergies)}\nMedications: {security.decrypt_data(patient.encrypted_medications)}\n\nRecent Context:\n{history_summaries}"
-    
-    patient_secure_id = f"PATIENT_{patient.id}"
-    res = ai_service.check_realtime(request.transcript, patient_secure_id, history_text)
-    
-    return schemas.RealtimeCheckResponse(
-        warning=res.get("warning", "SAFE"),
-        diarized_text=res.get("diarized_text", request.transcript)
-    )
+        history_text = f"Profile History: {security.decrypt_data(patient.encrypted_history)}\nAllergies: {security.decrypt_data(patient.encrypted_allergies)}\nMedications: {security.decrypt_data(patient.encrypted_medications)}\n\nRecent Context:\n{history_summaries}"
+        
+        patient_secure_id = f"PATIENT_{patient.id}"
+        res = ai_service.check_realtime(request.transcript, patient_secure_id, history_text)
+        
+        return schemas.RealtimeCheckResponse(
+            warning=res.get("warning", "SAFE"),
+            diarized_text=res.get("diarized_text", request.transcript)
+        )
+    except Exception as e:
+        # Never crash the session over a realtime AI check
+        return schemas.RealtimeCheckResponse(warning="SAFE", diarized_text=request.transcript)
 
 @app.post("/verify_prescription", response_model=schemas.PrescriptionVerifyResponse)
 def verify_prescription(request: schemas.PrescriptionVerifyRequest, current_doctor: models.Doctor = Depends(get_current_doctor), db: Session = Depends(get_db)):

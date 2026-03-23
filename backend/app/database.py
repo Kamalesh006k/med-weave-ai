@@ -4,7 +4,9 @@ from sqlalchemy.orm import sessionmaker
 import os
 from dotenv import load_dotenv
 
-load_dotenv()
+from pathlib import Path
+dotenv_path = Path(__file__).resolve().parent.parent / '.env'
+load_dotenv(dotenv_path=dotenv_path)
 
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:password@localhost:5432/medweave")
 
