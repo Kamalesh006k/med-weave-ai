@@ -69,3 +69,11 @@ class Consultation(BaseModel):
 
     class Config:
         from_attributes = True
+
+class RealtimeCheckRequest(BaseModel):
+    patient_id: int
+    transcript: str
+
+class RealtimeCheckResponse(BaseModel):
+    is_dangerous: bool
+    warning_message: str

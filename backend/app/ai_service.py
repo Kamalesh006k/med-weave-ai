@@ -5,15 +5,15 @@ import json
 
 load_dotenv()
 
-OPENROUTER_KEY = os.getenv("OPENROUTER_API_KEY")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 client = OpenAI(
-    base_url="https://openrouter.ai/api/v1",
-    api_key=OPENROUTER_KEY,
-) if OPENROUTER_KEY else None
+    base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+    api_key=GEMINI_API_KEY,
+) if GEMINI_API_KEY else None
 
-# Use a free, capable model available on OpenRouter
-MODEL = "google/gemini-2.0-flash-exp:free"
+# Use Gemini directly
+MODEL = "gemini-2.5-flash"
 
 PROMPT_TEMPLATE = """
 You are MedWeave AI, a clinical decision support assistant.
@@ -148,3 +148,26 @@ def chat_with_copilot(history_text: str, recent_summary: str, message: str):
         return _call(PROMPT_CHAT.format(history=history_text, recent_summary=recent_summary, message=message))
     except Exception as e:
         return f"Co-Pilot error: {str(e)}"
+
+PROMPT_REALTIME_CHECK = """
+You are MedWeave AI, a clinical safety monitor.
+Listen to the following live, ongoing dictation from a doctor.
+Patient History:
+{history}
+
+Current live dictation:
+{transcript}
+
+Does the doctor say anything blatantly wrong, dangerous, or contraindicated based on the history or medical knowledge? 
+If YES, respond with a short warning (max 1 sentence) starting with "WARNING:".
+If NO, or if incomplete, respond EXACTLY with "SAFE".
+"""
+
+def check_realtime(transcript: str, patient_history: str):
+    if not client:
+        return "SAFE"
+    try:
+        reply = _call(PROMPT_REALTIME_CHECK.format(history=patient_history, transcript=transcript))
+        return reply
+    except Exception:
+        return "SAFE"

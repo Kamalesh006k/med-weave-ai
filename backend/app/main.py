@@ -181,6 +181,21 @@ def chat_copilot(chat: schemas.ChatMessage, current_doctor: models.Doctor = Depe
     reply = ai_service.chat_with_copilot(history_text, recent_summary, chat.message)
     return {"reply": reply}
 
+@app.post("/realtime_check", response_model=schemas.RealtimeCheckResponse)
+def realtime_check(request: schemas.RealtimeCheckRequest, current_doctor: models.Doctor = Depends(get_current_doctor), db: Session = Depends(get_db)):
+    patient = db.query(models.Patient).filter(models.Patient.id == request.patient_id, models.Patient.doctor_id == current_doctor.id).first()
+    if not patient:
+        raise HTTPException(status_code=404, detail="Patient not found")
+    
+    history_text = f"History: {security.decrypt_data(patient.encrypted_history)}\nAllergies: {security.decrypt_data(patient.encrypted_allergies)}\nMedications: {security.decrypt_data(patient.encrypted_medications)}"
+    
+    reply = ai_service.check_realtime(request.transcript, history_text)
+    
+    if reply.upper().startswith("WARNING:"):
+        return schemas.RealtimeCheckResponse(is_dangerous=True, warning_message=reply[8:].strip())
+    else:
+        return schemas.RealtimeCheckResponse(is_dangerous=False, warning_message="")
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

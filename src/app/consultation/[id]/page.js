@@ -17,7 +17,9 @@ export default function ConsultationRoom() {
   const [chatLoading, setChatLoading] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [interimTranscript, setInterimTranscript] = useState('');
+  const [realtimeWarning, setRealtimeWarning] = useState(null);
   const recognitionRef = useRef(null);
+  const latestTextRef = useRef('');
   const router = useRouter();
 
   useEffect(() => {
@@ -67,6 +69,35 @@ export default function ConsultationRoom() {
     }
   }, [id]);
 
+  useEffect(() => {
+    latestTextRef.current = transcript + (interimTranscript ? interimTranscript : '');
+  }, [transcript, interimTranscript]);
+
+  useEffect(() => {
+    let interval;
+    if (isRecording) {
+      interval = setInterval(async () => {
+        const currentText = latestTextRef.current;
+        if (currentText.trim().length > 15) {
+          try {
+            const res = await consultationService.checkRealtime(id, currentText);
+            if (res?.is_dangerous) {
+              setRealtimeWarning(res.warning_message);
+            } else {
+              setRealtimeWarning("SAFE");
+            }
+          } catch (e) {
+            console.error("Realtime API check failed", e);
+            setRealtimeWarning("SAFE");
+          }
+        }
+      }, 4000); // Check every 4 seconds during active dictation
+    } else {
+      setRealtimeWarning(null);
+    }
+    return () => clearInterval(interval);
+  }, [isRecording, id]);
+
   const fetchPatientData = async () => {
     try {
       const [patientsData, historyData] = await Promise.all([
@@ -97,6 +128,7 @@ export default function ConsultationRoom() {
       }
       recognitionRef.current.start();
       setIsRecording(true);
+      setRealtimeWarning("SAFE");
     }
   };
 
@@ -206,6 +238,25 @@ export default function ConsultationRoom() {
                     </div>
                 </div>
             </div>
+            
+            {realtimeWarning && realtimeWarning !== "SAFE" && (
+                <div className="mb-4 bg-red-50 border-l-4 border-red-500 p-4 rounded-r-xl shadow-sm animate-pulse flex items-start gap-3 transition-all">
+                    <ShieldAlert className="text-red-500 shrink-0 mt-0.5" size={20} />
+                    <div>
+                        <h4 className="text-red-800 font-bold text-sm">Clinical Warning</h4>
+                        <p className="text-red-600 text-sm mt-1 leading-snug">{realtimeWarning}</p>
+                    </div>
+                </div>
+            )}
+
+            {isRecording && realtimeWarning === "SAFE" && (
+                <div className="mb-4 bg-emerald-50 border-l-4 border-emerald-500 p-3 rounded-r-xl shadow-sm flex items-center gap-3 transition-all">
+                    <Activity className="text-emerald-500 shrink-0 animate-pulse" size={16} />
+                    <div>
+                        <p className="text-emerald-700 text-xs font-bold uppercase tracking-widest">Live Safety Monitoring Active</p>
+                    </div>
+                </div>
+            )}
             
             <textarea
               value={transcript + (interimTranscript ? interimTranscript : '')}

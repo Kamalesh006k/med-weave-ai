@@ -80,5 +80,9 @@ export const consultationService = {
   chatCopilot: async (patient_id, message) => {
     const response = await api.post('/chat_copilot', { patient_id, message });
     return response.data.reply;
+  },
+  checkRealtime: async (patient_id, transcript) => {
+    const response = await api.post('/realtime_check', { patient_id, transcript });
+    return response.data;
   }
 };
