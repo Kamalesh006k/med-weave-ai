@@ -75,7 +75,11 @@ def add_patient(patient: schemas.PatientCreate, current_doctor: models.Doctor = 
         encrypted_name=security.encrypt_data(patient.name),
         encrypted_history=security.encrypt_data(patient.history),
         encrypted_allergies=security.encrypt_data(patient.allergies),
-        encrypted_medications=security.encrypt_data(patient.medications)
+        encrypted_medications=security.encrypt_data(patient.medications),
+        department=patient.department,
+        time_slot=patient.time_slot,
+        status=patient.status,
+        severity=patient.severity
     )
     db.add(db_patient)
     db.commit()
@@ -111,9 +115,23 @@ def get_patients(current_doctor: models.Doctor = Depends(get_current_doctor), db
             name=security.decrypt_data(p.encrypted_name),
             history=security.decrypt_data(p.encrypted_history),
             allergies=security.decrypt_data(p.encrypted_allergies),
-            medications=security.decrypt_data(p.encrypted_medications)
+            medications=security.decrypt_data(p.encrypted_medications),
+            department=p.department,
+            time_slot=p.time_slot,
+            status=p.status,
+            severity=p.severity
         ) for p in db_patients
     ]
+
+@app.delete("/delete_patient/{patient_id}")
+def delete_patient(patient_id: int, current_doctor: models.Doctor = Depends(get_current_doctor), db: Session = Depends(get_db)):
+    db_patient = db.query(models.Patient).filter(models.Patient.id == patient_id, models.Patient.doctor_id == current_doctor.id).first()
+    if not db_patient:
+        raise HTTPException(status_code=404, detail="Patient not found")
+    
+    db.delete(db_patient)
+    db.commit()
+    return {"message": "Patient deleted successfully"}
 
 @app.get("/daily_briefing")
 def get_daily_briefing(current_doctor: models.Doctor = Depends(get_current_doctor), db: Session = Depends(get_db)):
@@ -140,10 +158,15 @@ def analyze_consultation(consultation: schemas.ConsultationCreate, current_docto
     if not patient:
         raise HTTPException(status_code=404, detail="Patient not found")
     
-    history_text = f"History: {security.decrypt_data(patient.encrypted_history)}\nAllergies: {security.decrypt_data(patient.encrypted_allergies)}\nMedications: {security.decrypt_data(patient.encrypted_medications)}"
+    # Fetch historical context (last 3 sessions)
+    prev_sessions = db.query(models.Consultation).filter(models.Consultation.patient_id == patient.id).order_by(models.Consultation.created_at.desc()).limit(3).all()
+    history_summaries = "\n".join([f"Session {s.created_at}: {s.ai_analysis.get('summary', '')}" for s in prev_sessions if s.ai_analysis])
     
-    # 2. Run AI Analysis
-    analysis = ai_service.analyze_consultation(consultation.transcript, history_text)
+    history_text = f"Profile History: {security.decrypt_data(patient.encrypted_history)}\nAllergies: {security.decrypt_data(patient.encrypted_allergies)}\nMedications: {security.decrypt_data(patient.encrypted_medications)}\n\nRecent Summaries:\n{history_summaries}"
+    
+    # 2. Run AI Analysis (using Secure ID)
+    patient_secure_id = f"PATIENT_{patient.id}"
+    analysis = ai_service.analyze_consultation(consultation.transcript, patient_secure_id, history_text)
     
     # 3. Save consultation
     db_consultation = models.Consultation(
@@ -162,6 +185,16 @@ def analyze_consultation(consultation: schemas.ConsultationCreate, current_docto
 def get_history(patient_id: int, current_doctor: models.Doctor = Depends(get_current_doctor), db: Session = Depends(get_db)):
     return db.query(models.Consultation).filter(models.Consultation.patient_id == patient_id, models.Consultation.doctor_id == current_doctor.id).all()
 
+@app.delete("/delete_consultation/{consultation_id}")
+def delete_consultation(consultation_id: int, current_doctor: models.Doctor = Depends(get_current_doctor), db: Session = Depends(get_db)):
+    db_consultation = db.query(models.Consultation).filter(models.Consultation.id == consultation_id, models.Consultation.doctor_id == current_doctor.id).first()
+    if not db_consultation:
+        raise HTTPException(status_code=404, detail="Consultation not found")
+    
+    db.delete(db_consultation)
+    db.commit()
+    return {"message": "Consultation deleted successfully"}
+
 @app.post("/chat_copilot")
 def chat_copilot(chat: schemas.ChatMessage, current_doctor: models.Doctor = Depends(get_current_doctor), db: Session = Depends(get_db)):
     # Fetch patient history
@@ -169,7 +202,7 @@ def chat_copilot(chat: schemas.ChatMessage, current_doctor: models.Doctor = Depe
     if not patient:
         raise HTTPException(status_code=404, detail="Patient not found")
     
-    history_text = f"History: {security.decrypt_data(patient.encrypted_history)}\nAllergies: {security.decrypt_data(patient.encrypted_allergies)}\nMedications: {security.decrypt_data(patient.encrypted_medications)}"
+    history_text = f"Profile History: {security.decrypt_data(patient.encrypted_history)}\nAllergies: {security.decrypt_data(patient.encrypted_allergies)}\nMedications: {security.decrypt_data(patient.encrypted_medications)}"
     
     # Fetch latest consultation summary
     latest_consultation = db.query(models.Consultation).filter(models.Consultation.patient_id == chat.patient_id).order_by(models.Consultation.created_at.desc()).first()
@@ -177,8 +210,9 @@ def chat_copilot(chat: schemas.ChatMessage, current_doctor: models.Doctor = Depe
     if latest_consultation and latest_consultation.ai_analysis:
         recent_summary = latest_consultation.ai_analysis.get("summary", "")
 
-    # Ask the CoPilot
-    reply = ai_service.chat_with_copilot(history_text, recent_summary, chat.message)
+    # Ask the CoPilot (using Secure ID)
+    patient_secure_id = f"PATIENT_{patient.id}"
+    reply = ai_service.chat_with_copilot(patient_secure_id, history_text, recent_summary, chat.message)
     return {"reply": reply}
 
 @app.post("/realtime_check", response_model=schemas.RealtimeCheckResponse)
@@ -187,14 +221,41 @@ def realtime_check(request: schemas.RealtimeCheckRequest, current_doctor: models
     if not patient:
         raise HTTPException(status_code=404, detail="Patient not found")
     
-    history_text = f"History: {security.decrypt_data(patient.encrypted_history)}\nAllergies: {security.decrypt_data(patient.encrypted_allergies)}\nMedications: {security.decrypt_data(patient.encrypted_medications)}"
+    # Fetch historical summaries for real-time watchdog
+    prev_sessions = db.query(models.Consultation).filter(models.Consultation.patient_id == patient.id).order_by(models.Consultation.created_at.desc()).limit(2).all()
+    history_summaries = "\n".join([f"Prev Session: {s.ai_analysis.get('summary', '')}" for s in prev_sessions if s.ai_analysis])
+
+    history_text = f"Profile History: {security.decrypt_data(patient.encrypted_history)}\nAllergies: {security.decrypt_data(patient.encrypted_allergies)}\nMedications: {security.decrypt_data(patient.encrypted_medications)}\n\nRecent Context:\n{history_summaries}"
     
-    reply = ai_service.check_realtime(request.transcript, history_text)
+    patient_secure_id = f"PATIENT_{patient.id}"
+    res = ai_service.check_realtime(request.transcript, patient_secure_id, history_text)
     
-    if reply.upper().startswith("WARNING:"):
-        return schemas.RealtimeCheckResponse(is_dangerous=True, warning_message=reply[8:].strip())
-    else:
-        return schemas.RealtimeCheckResponse(is_dangerous=False, warning_message="")
+    return schemas.RealtimeCheckResponse(
+        warning=res.get("warning", "SAFE"),
+        diarized_text=res.get("diarized_text", request.transcript)
+    )
+
+@app.post("/verify_prescription", response_model=schemas.PrescriptionVerifyResponse)
+def verify_prescription(request: schemas.PrescriptionVerifyRequest, current_doctor: models.Doctor = Depends(get_current_doctor), db: Session = Depends(get_db)):
+    patient = db.query(models.Patient).filter(models.Patient.id == request.patient_id, models.Patient.doctor_id == current_doctor.id).first()
+    if not patient:
+        raise HTTPException(status_code=404, detail="Patient not found")
+    
+    history_text = security.decrypt_data(patient.encrypted_history)
+    allergies_text = security.decrypt_data(patient.encrypted_allergies)
+    
+    res = ai_service.verify_prescription(
+        request.prescription,
+        history_text,
+        allergies_text,
+        request.session_summary
+    )
+    
+    return schemas.PrescriptionVerifyResponse(
+        status=res.get("status", "WARNING"),
+        reason=res.get("reason", "Unknown verification outcome."),
+        suggestions=res.get("suggestions", "")
+    )
 
 if __name__ == "__main__":
     import uvicorn

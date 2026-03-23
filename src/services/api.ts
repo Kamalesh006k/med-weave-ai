@@ -62,6 +62,10 @@ export const patientService = {
     const response = await api.post('/parse_intake', { note });
     return response.data;
   },
+  deletePatient: async (id) => {
+    const response = await api.delete(`/delete_patient/${id}`);
+    return response.data;
+  },
   getDailyBriefing: async () => {
     const response = await api.get('/daily_briefing');
     return response.data.briefing;
@@ -83,6 +87,14 @@ export const consultationService = {
   },
   checkRealtime: async (patient_id, transcript) => {
     const response = await api.post('/realtime_check', { patient_id, transcript });
+    return response.data;
+  },
+  deleteConsultation: async (id) => {
+    const response = await api.delete(`/delete_consultation/${id}`);
+    return response.data;
+  },
+  verifyPrescription: async (patient_id, prescription, session_summary) => {
+    const response = await api.post('/verify_prescription', { patient_id, prescription, session_summary });
     return response.data;
   }
 };

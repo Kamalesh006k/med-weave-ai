@@ -6,14 +6,19 @@ import json
 load_dotenv()
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 
+# Use OpenRouter for more model flexibility
 client = OpenAI(
-    base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
-    api_key=GEMINI_API_KEY,
-) if GEMINI_API_KEY else None
+    base_url="https://openrouter.ai/api/v1",
+    api_key=OPENROUTER_API_KEY if OPENROUTER_API_KEY else GEMINI_API_KEY,
+    default_headers={
+        "HTTP-Referer": "http://localhost:3000",
+        "X-Title": "MedWeave AI",
+    }
+) if (OPENROUTER_API_KEY or GEMINI_API_KEY) else None
 
-# Use Gemini directly
-MODEL = "gemini-2.5-flash"
+MODEL = "google/gemini-2.0-flash-001"
 
 PROMPT_TEMPLATE = """
 You are MedWeave AI, a clinical decision support assistant.
@@ -25,7 +30,8 @@ DETECT:
 3. High-Risk Conditions (potential emergencies)
 4. Contradictions (between history and current symptoms)
 
-PATIENT HISTORY:
+PATIENT CONTEXT:
+Patient ID: {patient_id}
 {history}
 
 TRANSCRIPT:
@@ -35,6 +41,7 @@ RULES:
 - DO NOT prescribe medication.
 - DO NOT provide a final diagnosis.
 - ONLY provide suggestions and alerts for the doctor to review.
+- DO NOT use emojis in your responses.
 - Output MUST be in strict JSON format with no markdown code fences.
 
 JSON Structure:
@@ -54,7 +61,7 @@ def _call(prompt: str) -> str:
     )
     return response.choices[0].message.content.strip()
 
-def analyze_consultation(transcript: str, patient_history: str):
+def analyze_consultation(transcript: str, patient_id: str, patient_history: str):
     if not client:
         return {
             "alerts": [{"severity": "LOW", "type": "System", "message": "AI analysis unavailable - check API key"}],
@@ -62,7 +69,10 @@ def analyze_consultation(transcript: str, patient_history: str):
             "patient_explanation": "Thank you for sharing your concerns with your doctor today."
         }
     try:
-        text = _call(PROMPT_TEMPLATE.format(history=patient_history, transcript=transcript))
+        prompt = PROMPT_TEMPLATE.replace("{patient_id}", str(patient_id)) \
+                                .replace("{history}", patient_history) \
+                                .replace("{transcript}", transcript)
+        text = _call(prompt)
         # Strip markdown fences if present
         if text.startswith("```"):
             text = text.split("```")[1]
@@ -99,7 +109,8 @@ def parse_clinical_note(note: str):
     if not client:
         return {"name": "Unknown", "history": "API Key Missing", "allergies": "", "medications": "", "department": "all"}
     try:
-        text = _call(PROMPT_INTAKE.format(note=note))
+        prompt = PROMPT_INTAKE.replace("{note}", note)
+        text = _call(prompt)
         if text.startswith("```"):
             text = text.split("```")[1]
             if text.startswith("json"):
@@ -116,20 +127,21 @@ Write a short, urgent, professional 2-sentence "Daily Briefing" for the doctor, 
 PATIENTS:
 {patients_info}
 
-Output ONLY the briefing paragraph. No JSON. No markdown.
+Output ONLY the briefing paragraph. No JSON. No markdown. DO NOT use emojis.
 """
 
 def generate_briefing(patients_info: str):
     if not client:
         return "AI Briefing unavailable. Please review patient records manually."
     try:
-        return _call(PROMPT_BRIEFING.format(patients_info=patients_info))
+        prompt = PROMPT_BRIEFING.replace("{patients_info}", patients_info)
+        return _call(prompt)
     except Exception as e:
         return f"Could not generate briefing: {str(e)}"
 
 PROMPT_CHAT = """
 You are MedWeave AI Co-Pilot assisting a doctor during a consultation.
-Patient context and history:
+Patient Context (Secure ID: {patient_id}):
 {history}
 
 Recent Diagnostic Synthesis:
@@ -138,36 +150,97 @@ Recent Diagnostic Synthesis:
 Doctor's Question:
 {message}
 
-Provide a concise, professional, evidence-based response. No markdown headers.
+Provide a concise, professional, evidence-based response. No markdown headers. DO NOT use emojis.
 """
 
-def chat_with_copilot(history_text: str, recent_summary: str, message: str):
+def chat_with_copilot(patient_id: str, history_text: str, recent_summary: str, message: str):
     if not client:
         return "Co-Pilot is currently offline. Please check your system configuration."
     try:
-        return _call(PROMPT_CHAT.format(history=history_text, recent_summary=recent_summary, message=message))
+        prompt = PROMPT_CHAT.replace("{patient_id}", str(patient_id)) \
+                            .replace("{history}", history_text) \
+                                .replace("{recent_summary}", recent_summary) \
+                                .replace("{message}", message)
+        return _call(prompt)
     except Exception as e:
         return f"Co-Pilot error: {str(e)}"
 
 PROMPT_REALTIME_CHECK = """
-You are MedWeave AI, a clinical safety monitor.
-Listen to the following live, ongoing dictation from a doctor.
-Patient History:
+You are MedWeave AI, a high-speed clinical safety monitor.
+Analyze this live consultation transcript and provide INSTANT feedback.
+
+1. SPEAKER IDENTIFICATION: Distinguish between Patient and Doctor.
+2. DIARIZATION: Format as a labeled conversation.
+3. ERROR WATCHDOG: Flag ANY contradiction by the Physician. 
+   - QUOTE the physician's error directly (e.g., "Doctor said X but Patient has Y").
+   - CRITICAL: Detect "Diagnostic Misunderstandings" (e.g., if the doctor suggests a mild condition while symptoms/history suggest something severe like a cardiac event).
+4. CONTEXTUAL ALERT: If a risk is found, explain it clearly in < 15 words.
+5. CONSISTENCY: Maintain the SAME speaker assignments for previous sentences. If you already labeled a person as "Patient", keep it "Patient".
+
+Patient Context (Secure ID: {patient_id}):
 {history}
 
-Current live dictation:
+Current Live Transcript:
 {transcript}
 
-Does the doctor say anything blatantly wrong, dangerous, or contraindicated based on the history or medical knowledge? 
-If YES, respond with a short warning (max 1 sentence) starting with "WARNING:".
-If NO, or if incomplete, respond EXACTLY with "SAFE".
+OUTPUT RULES:
+- STRICT JSON ONLY.
+- "warning": "[Concise risk/diagnostic alert]" OR "SAFE".
+- "diarized_text": "[Labeled conversation]".
+- DO NOT use emojis.
+- MAINTAIN CONTINUITY: Do not change previous speaker labels.
 """
 
-def check_realtime(transcript: str, patient_history: str):
+def check_realtime(transcript: str, patient_id: str, patient_history: str):
     if not client:
-        return "SAFE"
+        return {"warning": "SAFE", "diarized_text": transcript}
     try:
-        reply = _call(PROMPT_REALTIME_CHECK.format(history=patient_history, transcript=transcript))
-        return reply
+        prompt = PROMPT_REALTIME_CHECK.replace("{patient_id}", str(patient_id)) \
+                                      .replace("{history}", patient_history) \
+                                      .replace("{transcript}", transcript)
+        reply = _call(prompt)
+        # Robust JSON extraction
+        start = reply.find('{')
+        end = reply.rfind('}') + 1
+        if start != -1 and end != -1:
+            return json.loads(reply[start:end])
+        return {"warning": "SAFE", "diarized_text": transcript}
     except Exception:
-        return "SAFE"
+        return {"warning": "SAFE", "diarized_text": transcript}
+
+PROMPT_PRESCRIPTION_VERIFY = """
+You are MedWeave AI Safety Watchdog. Verify the following prescription.
+PATIENT HISTORY: {history}
+ALLERGIES: {allergies}
+CURRENT SESSION FINDINGS: {summary}
+
+PROPOSED PRESCRIPTION:
+{prescription}
+
+Analyze for:
+1. Allergic contraindications.
+2. Drug-drug interactions with current medications.
+3. Clinical appropriateness given the session findings.
+
+Output MUST be in strict JSON format.
+{{
+  "status": "APPROVED|WARNING|CRITICAL",
+  "reason": "Detailed medical rationale for the status",
+  "suggestions": "Alternative suggestions if any"
+}}
+"""
+
+def verify_prescription(prescription: str, history: str, allergies: str, summary: str):
+    if not client:
+        return {"status": "WARNING", "reason": "AI verification offline."}
+    try:
+        prompt = PROMPT_PRESCRIPTION_VERIFY.replace("{history}", history) \
+                                          .replace("{allergies}", allergies) \
+                                          .replace("{summary}", summary) \
+                                          .replace("{prescription}", prescription)
+        reply = _call(prompt)
+        start = reply.find('{')
+        end = reply.rfind('}') + 1
+        return json.loads(reply[start:end])
+    except Exception as e:
+        return {"status": "WARNING", "reason": f"Verification failed: {str(e)}"}

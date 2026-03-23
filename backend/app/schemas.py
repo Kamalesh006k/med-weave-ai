@@ -32,6 +32,10 @@ class PatientBase(BaseModel):
     history: Optional[str] = None
     allergies: Optional[str] = None
     medications: Optional[str] = None
+    department: Optional[str] = "all"
+    time_slot: Optional[str] = None
+    status: Optional[str] = "Scheduled"
+    severity: Optional[str] = "Normal"
 
 class PatientCreate(PatientBase):
     pass
@@ -52,6 +56,8 @@ class Patient(BaseModel):
     history: Optional[str] = None
     allergies: Optional[str] = None
     medications: Optional[str] = None
+    department: Optional[str] = "all"
+    time_slot: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -75,5 +81,15 @@ class RealtimeCheckRequest(BaseModel):
     transcript: str
 
 class RealtimeCheckResponse(BaseModel):
-    is_dangerous: bool
-    warning_message: str
+    warning: str
+    diarized_text: str
+
+class PrescriptionVerifyRequest(BaseModel):
+    patient_id: int
+    prescription: str
+    session_summary: Optional[str] = ""
+
+class PrescriptionVerifyResponse(BaseModel):
+    status: str
+    reason: str
+    suggestions: Optional[str] = ""
