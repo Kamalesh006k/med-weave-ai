@@ -1,8 +1,8 @@
 "use client";
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { consultationService, patientService } from '@/services/api';
-import { AlertCircle, CheckCircle2, Info, Send, User, Brain, ArrowLeft, History } from 'lucide-react';
+import { ArrowLeft, Activity, Info, AlertTriangle, CheckCircle2, FileText, User, Calendar, Clock, Loader2, LayoutGrid, HeartPulse, Brain, Send, Mic, MicOff, Zap, ShieldAlert, History, AlertCircle, MoreHorizontal } from 'lucide-react';
 
 export default function ConsultationRoom() {
   const { id } = useParams();
@@ -11,177 +11,407 @@ export default function ConsultationRoom() {
   const [analysis, setAnalysis] = useState(null);
   const [loading, setLoading] = useState(false);
   const [history, setHistory] = useState([]);
+  const [perspective, setPerspective] = useState('physician'); // 'physician' or 'patient'
+  const [chatMessage, setChatMessage] = useState('');
+  const [chatLog, setChatLog] = useState([]);
+  const [chatLoading, setChatLoading] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const [interimTranscript, setInterimTranscript] = useState('');
+  const recognitionRef = useRef(null);
   const router = useRouter();
 
   useEffect(() => {
     fetchPatientData();
+
+    // Initialize Speech Recognition
+    if (typeof window !== 'undefined') {
+      try {
+        if ('webkitSpeechRecognition' in window) {
+          recognitionRef.current = new window.webkitSpeechRecognition();
+        } else if ('SpeechRecognition' in window) {
+          recognitionRef.current = new window.SpeechRecognition();
+        }
+
+        if (recognitionRef.current) {
+          recognitionRef.current.continuous = true;
+          recognitionRef.current.interimResults = true;
+
+        recognitionRef.current.onresult = (event) => {
+          let finalT = '';
+          let interimT = '';
+          for (let i = event.resultIndex; i < event.results.length; ++i) {
+            if (event.results[i].isFinal) {
+              finalT += event.results[i][0].transcript + ' ';
+            } else {
+              interimT += event.results[i][0].transcript;
+            }
+          }
+          if (finalT) {
+             setTranscript((prev) => prev + finalT);
+          }
+          setInterimTranscript(interimT);
+        };
+
+        recognitionRef.current.onerror = (event) => {
+          console.error('Speech recognition error', event.error);
+          setIsRecording(false);
+        };
+
+        recognitionRef.current.onend = () => {
+          setIsRecording(false);
+        };
+        }
+      } catch (e) {
+        console.error("SpeechRecognition failed to initialize:", e);
+      }
+    }
   }, [id]);
 
   const fetchPatientData = async () => {
     try {
-      const patients = await patientService.getPatients();
-      const p = patients.find(p => p.id == id);
-      setPatient(p);
-
-      const h = await consultationService.getHistory(id);
-      setHistory(h);
+      const [patientsData, historyData] = await Promise.all([
+        patientService.getPatients(),
+        consultationService.getHistory(id)
+      ]);
+      const currentPatient = patientsData.find(p => p.id === parseInt(id));
+      setPatient(currentPatient);
+      setHistory(historyData);
     } catch (err) {
       console.error(err);
     }
   };
 
-  const handleAnalyze = async () => {
-    if (!transcript.trim()) return;
+  const toggleRecording = () => {
+    if (isRecording) {
+      recognitionRef.current?.stop();
+      setIsRecording(false);
+      
+      const finalInput = transcript + (interimTranscript ? interimTranscript : '');
+      if (finalInput.trim()) {
+         handleAnalyze(finalInput);
+      }
+    } else {
+      if (!recognitionRef.current) {
+        alert("Speech recognition isn't supported in this browser. Please try Chrome, Edge, or Safari.");
+        return;
+      }
+      recognitionRef.current.start();
+      setIsRecording(true);
+    }
+  };
+
+  const handleAnalyze = async (textToUse) => {
+    const text = typeof textToUse === 'string' ? textToUse : transcript;
+    if (!text?.trim()) return;
     setLoading(true);
     try {
-      const result = await consultationService.analyze(id, transcript);
+      const result = await consultationService.analyze(id, text);
       setAnalysis(result.ai_analysis);
       fetchPatientData(); // Refresh history
+      setPerspective('physician'); // Reset to default perspective
+      setChatLog([{ role: 'ai', content: 'Diagnostic synthesis generated. How can I assist you further with this patient?' }]);
     } catch (err) {
-      alert('Analysis failed');
+      alert('Clinical analysis failed. Please check system connectivity.');
     } finally {
       setLoading(false);
     }
   };
 
-  if (!patient) return <div className="p-20 text-center text-slate-500">Loading patient profile...</div>;
+  const handleChatSubmit = async (e) => {
+      e?.preventDefault();
+      if (!chatMessage.trim()) return;
+      
+      const newLog = [...chatLog, { role: 'user', content: chatMessage }];
+      setChatLog(newLog);
+      
+      const msgToSend = chatMessage;
+      setChatMessage('');
+      setChatLoading(true);
+      
+      try {
+          const reply = await consultationService.chatCopilot(id, msgToSend);
+          setChatLog([...newLog, { role: 'ai', content: reply }]);
+      } catch (err) {
+          setChatLog([...newLog, { role: 'ai', content: 'Connection to Co-Pilot failed.' }]);
+      } finally {
+          setChatLoading(false);
+      }
+  };
+
+  if (!patient) return (
+    <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-8">
+        <div className="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin mb-4" />
+        <p className="text-slate-400 font-bold uppercase tracking-widest text-xs">Synchronizing Clinical Profile...</p>
+    </div>
+  );
 
   return (
-    <div className="min-h-screen bg-slate-950 text-white flex flex-col">
-      {/* Header */}
-      <header className="border-b border-slate-800 bg-slate-900/50 backdrop-blur-md p-4 sticky top-0 z-10">
-        <div className="max-w-7xl mx-auto flex justify-between items-center">
+    <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col font-sans">
+      <div className="absolute inset-0 medical-subtle-dot opacity-30 pointer-events-none" />
+
+      {/* Clinical Header */}
+      <header className="clinical-header p-4 sticky top-0 z-20 shadow-sm flex items-center justify-center">
+        <div className="max-w-7xl mx-auto w-full flex justify-between items-center">
           <div className="flex items-center gap-4">
-            <button onClick={() => router.push('/dashboard')} className="p-2 hover:bg-slate-800 rounded-full transition-all">
+            <button onClick={() => router.push('/dashboard')} className="p-2.5 hover:bg-slate-50 border border-transparent hover:border-slate-200 rounded-xl transition-all text-slate-500">
               <ArrowLeft size={20} />
             </button>
-            <div className="flex items-center gap-3 border-l border-slate-700 pl-4">
-              <div className="w-10 h-10 rounded-full bg-blue-900/40 flex items-center justify-center text-blue-400">
-                <User size={20} />
+            <div className="flex items-center gap-4 border-l border-slate-200 pl-4">
+              <div className="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center text-white font-bold shadow-lg shadow-indigo-100">
+                {patient.name.charAt(0)}
               </div>
               <div>
-                <h2 className="font-bold text-slate-100">{patient.name}</h2>
-                <p className="text-xs text-slate-500 uppercase tracking-wider">Active Consultation</p>
+                <h2 className="font-extrabold text-slate-900 leading-tight">{patient.name}</h2>
+                <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-bold text-indigo-600 uppercase tracking-wider">Active Session</span>
+                    <span className="text-[10px] text-slate-400 border-l border-slate-200 pl-2">ID: {patient.id}</span>
+                </div>
               </div>
             </div>
           </div>
-          <div className="flex gap-4">
-            <div className="text-right hidden sm:block">
-              <p className="text-xs text-slate-500 font-medium">ALLERGIES</p>
-              <p className="text-sm text-red-400 font-bold">{patient.allergies || "None Reported"}</p>
+          <div className="flex gap-6">
+            <div className="text-right hidden md:block">
+              <p className="medical-label mb-0.5">Known Allergies</p>
+              <p className="text-sm text-red-600 font-bold">{patient.allergies || "No Reported Conflicts"}</p>
             </div>
-            <div className="text-right border-l border-slate-800 pl-4 hidden sm:block">
-              <p className="text-xs text-slate-500 font-medium">LAST MEDICATION</p>
-              <p className="text-sm text-blue-400 font-bold">{patient.medications || "None"}</p>
+            <div className="text-right border-l border-slate-200 pl-6 hidden md:block">
+              <p className="medical-label mb-0.5">Active Medications</p>
+              <p className="text-sm text-indigo-600 font-bold">{patient.medications || "None Recorded"}</p>
             </div>
           </div>
         </div>
       </header>
 
-      <main className="flex-1 max-w-7xl mx-auto w-full grid grid-cols-1 lg:grid-cols-12 gap-0 overflow-hidden">
-        {/* Left Column: Input & Transcript */}
-        <div className="lg:col-span-7 border-r border-slate-900 flex flex-col p-6 overflow-y-auto max-h-[calc(100vh-80px)]">
-          <div className="mb-6">
-            <label className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-2 block">Live Input Feed</label>
+      <main className="flex-1 max-w-7xl mx-auto w-full grid grid-cols-1 lg:grid-cols-12 gap-0 relative z-10 overflow-hidden">
+        {/* Input Feed & Session History */}
+        <div className="lg:col-span-7 border-r border-slate-200 flex flex-col p-8 overflow-y-auto max-h-[calc(100vh-73px)]">
+          <div className="mb-8">
+            <div className="flex justify-between items-center mb-4">
+                <label className="medical-label flex items-center gap-2">
+                    <Activity size={14} className="text-indigo-600" /> Live Clinical Feed
+                </label>
+                <div className="flex items-center gap-3">
+                    <button 
+                        onClick={toggleRecording}
+                        className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold transition-all shadow-sm ${isRecording ? 'bg-red-50 text-red-600 border border-red-200' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'}`}
+                    >
+                        {isRecording ? (
+                            <><MicOff size={14} className="animate-pulse" /> Stop Listening</>
+                        ) : (
+                            <><Mic size={14} /> Start Real-time Dictation</>
+                        )}
+                    </button>
+                    <div className="px-2 py-0.5 bg-indigo-50 text-[9px] font-black text-indigo-600 rounded uppercase tracking-tighter border border-indigo-100 italic">
+                        {isRecording ? "Live Mic Active" : "Mic Off"}
+                    </div>
+                </div>
+            </div>
+            
             <textarea
-              value={transcript}
-              onChange={(e) => setTranscript(e.target.value)}
-              placeholder="Start typing or simulate patient conversation here..."
-              className="w-full h-48 bg-slate-900 border border-slate-800 rounded-xl p-4 text-slate-100 focus:outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/50 transition-all resize-none shadow-inner"
+              value={transcript + (interimTranscript ? interimTranscript : '')}
+              readOnly
+              placeholder="Click 'Start Real-time Dictation' and begin speaking. The AI will listen and document the consultation here automatically..."
+              className="w-full h-56 bg-slate-50 border border-slate-200 rounded-2xl p-6 text-slate-800 transition-all shadow-inner placeholder:text-slate-400 font-medium leading-relaxed resize-none cursor-default"
             ></textarea>
-            <div className="mt-4 flex justify-end">
-              <button
-                onClick={handleAnalyze}
-                disabled={loading || !transcript}
-                className={`flex items-center gap-2 px-6 py-3 rounded-lg font-bold transition-all shadow-lg ${loading ? 'bg-slate-800 text-slate-500' : 'bg-blue-600 hover:bg-blue-500 text-white shadow-blue-900/20'}`}
-              >
-                {loading ? 'Running AI Diagnostics...' : <><Brain size={20} /> Analyze Consultation</>}
-              </button>
+            
+            <div className="mt-4 flex justify-between items-center">
+                <p className="text-[10px] text-slate-400 font-medium italic italic">MedWeave Intelligence will verify findings against patient history upon stopping the dictation.</p>
+                {loading && (
+                    <div className="flex items-center gap-2 px-6 py-2 rounded-xl font-bold bg-slate-100 text-slate-400 border border-slate-200 shadow-sm text-sm">
+                        <Loader2 size={16} className="animate-spin" /> Synthesizing...
+                    </div>
+                )}
             </div>
           </div>
 
-          <div className="flex-1">
-            <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2">
-              <History size={16} /> Clinical Session History
+          <div className="flex-1 pt-8 border-t border-slate-100">
+            <h3 className="medical-label mb-6 flex items-center gap-2">
+              <History size={14} /> Historical Context
             </h3>
             <div className="space-y-4">
-              {history.length === 0 && <p className="text-slate-600 italic">No previous sessions found.</p>}
+              {history.length === 0 && (
+                <div className="p-8 border-2 border-dashed border-slate-100 rounded-2xl flex flex-col items-center justify-center text-center">
+                    <FileText size={32} className="text-slate-100 mb-2" />
+                    <p className="text-slate-300 text-xs font-bold uppercase tracking-widest leading-normal">Initial Patient Contact<br/>No Previous Sessions</p>
+                </div>
+              )}
               {history.map((session, idx) => (
-                <div key={idx} className="bg-slate-900/50 border border-slate-800/50 rounded-lg p-3 text-sm text-slate-400">
-                  <p className="mb-1 text-slate-500 text-[10px] uppercase font-bold">{new Date(session.created_at).toLocaleString()}</p>
-                  <p className="line-clamp-2">{session.transcript}</p>
+                <div key={idx} className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
+                  <div className="flex justify-between items-center mb-3">
+                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{new Date(session.created_at).toLocaleString()}</span>
+                      <div className="p-1.5 bg-slate-50 rounded-lg text-slate-300 hover:text-indigo-600 transition-colors cursor-pointer"><MoreHorizontal size={14} /></div>
+                  </div>
+                  <p className="text-sm text-slate-600 leading-relaxed font-medium">{session.transcript}</p>
                 </div>
               ))}
             </div>
           </div>
         </div>
 
-        {/* Right Column: AI Analysis Output */}
-        <div className="lg:col-span-5 bg-slate-900/30 p-6 overflow-y-auto max-h-[calc(100vh-80px)]">
-          <label className="text-sm font-bold text-blue-400 uppercase tracking-widest mb-6 block border-b border-blue-900/30 pb-2">MedWeave Intelligence Output</label>
+        {/* Intelligence Output Interface */}
+        <div className="lg:col-span-5 bg-white/50 backdrop-blur-sm p-8 overflow-y-auto max-h-[calc(100vh-73px)] relative flex flex-col">
+          <div className="flex items-center justify-between mb-8 border-b border-slate-100 pb-4">
+              <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center text-white shadow-md">
+                      <Brain size={18} />
+                  </div>
+                  <div>
+                      <h3 className="text-xs font-black text-slate-900 uppercase tracking-[0.2em]">Clinical Report</h3>
+                      <p className="text-[9px] text-slate-400 font-bold uppercase">MedWeave Real-Time Analysis</p>
+                  </div>
+              </div>
+              
+              {/* Perspective Toggle */}
+              {analysis && (
+                  <div className="flex bg-slate-100 p-1 rounded-xl">
+                      <button 
+                          onClick={() => setPerspective('physician')}
+                          className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${perspective === 'physician' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+                      >
+                          <LayoutGrid size={12} /> Tech
+                      </button>
+                      <button 
+                          onClick={() => setPerspective('patient')}
+                          className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${perspective === 'patient' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+                      >
+                          <HeartPulse size={12} /> Patient
+                      </button>
+                  </div>
+              )}
+          </div>
 
           {!analysis && !loading && (
-            <div className="flex flex-col items-center justify-center h-64 text-center">
-              <Brain size={48} className="text-slate-800 mb-4" />
-              <p className="text-slate-500">Awaiting consultation data for AI cross-referencing.</p>
+            <div className="flex-1 flex flex-col items-center justify-center py-32 text-center">
+              <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mb-6 border border-slate-100">
+                  <ShieldAlert size={32} className="text-slate-200" />
+              </div>
+              <p className="text-slate-400 text-xs font-bold uppercase tracking-widest leading-relaxed">Awaiting clinical input<br/>for automated synthesis.</p>
             </div>
           )}
 
           {loading && (
-            <div className="animate-pulse space-y-4">
-              <div className="h-20 bg-slate-800 rounded-lg"></div>
-              <div className="h-32 bg-slate-800 rounded-lg"></div>
-              <div className="h-24 bg-slate-800 rounded-lg"></div>
+            <div className="space-y-6 animate-pulse">
+              <div className="h-24 bg-slate-200/50 rounded-2xl"></div>
+              <div className="h-48 bg-slate-200/50 rounded-2xl"></div>
+              <div className="h-32 bg-slate-200/50 rounded-2xl"></div>
             </div>
           )}
 
           {analysis && (
-            <div className="space-y-6 animate-in slide-in-from-right duration-500">
-              {/* Alerts Secion */}
-              <div>
-                <h4 className="text-sm font-bold text-slate-300 mb-3 flex items-center gap-2">
-                  <AlertCircle size={18} className="text-red-400" /> Critical Alerts
-                </h4>
-                <div className="space-y-2">
-                  {analysis.alerts.map((alert, idx) => (
-                    <div key={idx} className={`p-3 rounded-lg border flex gap-3 ${alert.severity === 'HIGH' ? 'bg-red-500/10 border-red-500/20 text-red-200' :
-                        alert.severity === 'MEDIUM' ? 'bg-yellow-500/10 border-yellow-500/20 text-yellow-200' :
-                          'bg-blue-500/10 border-blue-500/20 text-blue-200'
-                      }`}>
-                      <Info size={18} className="mt-0.5 shrink-0" />
-                      <div>
-                        <p className="text-xs font-bold uppercase mb-1">{alert.type}</p>
-                        <p className="text-sm">{alert.message}</p>
-                      </div>
+            <div className="space-y-8 animate-in slide-in-from-right duration-500">
+              
+              {perspective === 'physician' ? (
+                  <>
+                    {/* Clinical Insight Grid - 2x2 Format */}
+                    <div className="grid grid-cols-2 gap-4">
+                        {/* Box 1: Critical Risks */}
+                        <div className="bg-white border border-slate-200 p-4 rounded-2xl shadow-sm">
+                            <h4 className="text-[10px] font-black text-red-600 uppercase tracking-widest mb-2 flex items-center gap-1"><AlertCircle size={10} /> Critical Risks</h4>
+                            <div className="space-y-2">
+                                {analysis.alerts.filter(a => a.severity === 'HIGH').length > 0 ? 
+                                    analysis.alerts.filter(a => a.severity === 'HIGH').map((a, i) => (
+                                        <p key={i} className="text-xs font-bold text-slate-800 leading-snug">{a.message}</p>
+                                    ))
+                                : <p className="text-xs text-slate-400 font-medium italic">No immediate high-risk flags detected.</p>}
+                            </div>
+                        </div>
+                        
+                        {/* Box 2: Observations / Medium Risks */}
+                        <div className="bg-white border border-slate-200 p-4 rounded-2xl shadow-sm">
+                            <h4 className="text-[10px] font-black text-amber-600 uppercase tracking-widest mb-2 flex items-center gap-1"><ShieldAlert size={10} /> Observations</h4>
+                            <div className="space-y-2">
+                                {analysis.alerts.filter(a => a.severity === 'MEDIUM' || a.severity === 'LOW').length > 0 ? 
+                                    analysis.alerts.filter(a => a.severity === 'MEDIUM' || a.severity === 'LOW').map((a, i) => (
+                                        <p key={i} className="text-xs font-bold text-slate-800 leading-snug">{a.message}</p>
+                                    ))
+                                : <p className="text-xs text-slate-400 font-medium italic">No notable observational flags.</p>}
+                            </div>
+                        </div>
                     </div>
-                  ))}
-                  {analysis.alerts.length === 0 && (
-                    <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-lg flex items-center gap-2 text-sm">
-                      <CheckCircle2 size={18} /> No immediate risks detected.
+
+                    {/* Physician Summary */}
+                    <div className="clinical-card bg-slate-900 text-white p-6 shadow-xl shadow-slate-200 border-none relative overflow-hidden group">
+                        <div className="absolute top-0 right-0 p-3 opacity-10 group-hover:opacity-20 transition-opacity"><Brain size={48} /></div>
+                        <h4 className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-3">Diagnostic Synthesis</h4>
+                        <p className="text-sm leading-relaxed text-slate-100 font-medium">
+                        {analysis.summary}
+                        </p>
                     </div>
-                  )}
-                </div>
-              </div>
+                  </>
+              ) : (
+                  <>
+                    {/* Patient Education View */}
+                    <div className="bg-white border border-indigo-100 rounded-3xl p-8 shadow-lg shadow-indigo-50/50">
+                        <div className="w-12 h-12 bg-indigo-50 rounded-2xl flex items-center justify-center text-indigo-600 mb-6 mx-auto">
+                            <HeartPulse size={24} />
+                        </div>
+                        <h4 className="text-center text-lg font-black text-slate-900 mb-2">Your Care Plan Summary</h4>
+                        <p className="text-center text-xs font-bold text-slate-400 uppercase tracking-widest mb-6 border-b border-slate-100 pb-6">Simplified for Patient Review</p>
+                        
+                        <div className="text-[15px] text-slate-700 leading-loose font-medium space-y-4">
+                        "{analysis.patient_explanation}"
+                        </div>
+                        
+                        <div className="mt-8 pt-6 border-t border-slate-100 flex justify-center">
+                            <button className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2.5 rounded-xl text-sm font-bold transition-all shadow-md flex items-center gap-2">
+                                Print for Patient <ArrowLeft size={14} className="rotate-180" />
+                            </button>
+                        </div>
+                    </div>
+                  </>
+              )}
 
-              {/* Summary */}
-              <div>
-                <h4 className="text-sm font-bold text-slate-300 mb-2">Clinical Summary</h4>
-                <div className="bg-slate-800/80 rounded-xl p-4 border border-slate-700 text-sm leading-relaxed text-slate-200">
-                  {analysis.summary}
-                </div>
-              </div>
-
-              {/* Patient Friendly Explanation */}
-              <div>
-                <h4 className="text-sm font-bold text-slate-300 mb-2">Patient-Friendly Explanation</h4>
-                <div className="bg-slate-800/40 rounded-xl p-4 border border-slate-700/50 text-sm text-slate-400 italic">
-                  "{analysis.patient_explanation}"
-                </div>
-              </div>
             </div>
           )}
+
+          {/* Interactive Clinical Co-Pilot (Only visible after analysis) */}
+          {analysis && (
+              <div className="mt-12 flex-1 flex flex-col min-h-[300px] border-t border-slate-200 pt-8 relative">
+                  <h4 className="medical-label mb-4 flex items-center gap-2">
+                      <Brain size={14} className="text-indigo-600" /> Interactive Clinical Co-Pilot
+                  </h4>
+                  
+                  <div className="flex-1 overflow-y-auto pr-2 space-y-4 mb-4">
+                      {chatLog.map((log, i) => (
+                          <div key={i} className={`flex ${log.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                              <div className={`max-w-[85%] rounded-2xl px-5 py-3 text-sm font-medium ${log.role === 'user' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-100' : 'bg-slate-100 text-slate-800'}`}>
+                                  {log.content}
+                              </div>
+                          </div>
+                      ))}
+                      {chatLoading && (
+                          <div className="flex justify-start">
+                              <div className="bg-slate-100 text-slate-800 rounded-2xl px-5 py-3 text-sm font-medium flex gap-1 items-center">
+                                  <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce"></span>
+                                  <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce delay-75"></span>
+                                  <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce delay-150"></span>
+                              </div>
+                          </div>
+                      )}
+                  </div>
+
+                  <form onSubmit={handleChatSubmit} className="relative mt-auto">
+                      <input 
+                          type="text" 
+                          value={chatMessage}
+                          onChange={(e) => setChatMessage(e.target.value)}
+                          placeholder="Ask Co-Pilot about alternatives, risks, or deep dive..."
+                          className="w-full bg-white border border-slate-200 rounded-full py-4 pl-6 pr-14 text-sm focus:outline-none focus:ring-4 focus:ring-indigo-500/5 focus:border-indigo-500 shadow-sm"
+                      />
+                      <button 
+                          type="submit" 
+                          disabled={chatLoading || !chatMessage.trim()}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 w-10 h-10 bg-indigo-600 hover:bg-indigo-700 text-white rounded-full flex items-center justify-center transition-all disabled:opacity-50"
+                      >
+                          <Send size={16} />
+                      </button>
+                  </form>
+              </div>
+          )}
+
         </div>
       </main>
     </div>
   );
 }
+

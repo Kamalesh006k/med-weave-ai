@@ -1,70 +1,129 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #F8FAFC; /* Slate 50 */
+  --foreground: #0F172A; /* Slate 900 */
+  --surface: #FFFFFF;
+  --primary: #4F46E5; /* Indigo 600 */
+  --primary-hover: #4338CA;
+  --border: #E2E8F0; /* Slate 200 */
+  --muted: #64748B; /* Slate 500 */
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-border-clinical: var(--border);
+  --color-medical-muted: var(--muted);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans), system-ui, sans-serif;
+  letter-spacing: -0.01em;
 }
 
-.bg-grid {
-  background-image:
-    linear-gradient(to right, rgba(255, 255, 255, 0.01) 2px, transparent 2px),
-    linear-gradient(to bottom, rgba(255, 255, 255, 0.01) 2px, transparent 2px);
-  background-size: 60px 60px;
+/* Professional Clinical Textures */
+.medical-grid {
+  background-image: 
+    linear-gradient(var(--border) 1px, transparent 1px),
+    linear-gradient(90deg, var(--border) 1px, transparent 1px);
+  background-size: 40px 40px;
+  background-position: center center;
+  mask-image: radial-gradient(ellipse at center, black, transparent 80%);
 }
 
-.bg-dot {
-  background-image: radial-gradient(rgba(37, 99, 235, 0.1) 1.5px, transparent 1.5px);
-  background-size: 32px 32px;
+.medical-subtle-dot {
+  background-image: radial-gradient(#cbd5e1 1px, transparent 1px);
+  background-size: 20px 20px;
 }
 
-/* Smooth Animations */
-@keyframes pulse-emerald {
-
-  0%,
-  100% {
-    opacity: 1;
-    transform: scale(1);
-    box-shadow: 0 0 10px rgba(16, 185, 129, 0.3);
-  }
-
-  50% {
-    opacity: 0.6;
-    transform: scale(1.1);
-    box-shadow: 0 0 20px rgba(16, 185, 129, 0.5);
-  }
+/* Professional Components (Replacing Glassmorphism) */
+.clinical-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.pulse-emerald {
-  animation: pulse-emerald 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+.clinical-card:hover {
+  box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+  border-color: #cbd5e1;
 }
 
-/* Glassmorphism Refined */
-.glass {
-  background: rgba(255, 255, 255, 0.01);
-  backdrop-filter: blur(40px);
-  border: 1px solid rgba(255, 255, 255, 0.05);
+.clinical-header {
+  border-bottom: 1px solid var(--border);
+  background: white;
+  z-index: 10;
 }
 
-.shadow-3xl {
-  box-shadow: 0 40px 100px -20px rgba(0, 0, 0, 0.8);
+.medical-label {
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
 }
+
+.clinical-button {
+  background: var(--primary);
+  color: white;
+  padding: 0.5rem 1rem;
+  border-radius: 0.5rem;
+  font-weight: 500;
+  transition: background 0.2s;
+}
+
+.clinical-button:hover {
+  background: var(--primary-hover);
+}
+
+.medical-blueprint {
+  background-image: 
+    linear-gradient(to right, #E2E8F0 1px, transparent 1px),
+    linear-gradient(to bottom, #E2E8F0 1px, transparent 1px);
+  background-size: 40px 40px;
+  background-position: center center;
+}
+
+/* Unique Sparkline Utility */
+.sparkline-container {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 24px;
+}
+
+.sparkline-bar {
+  width: 4px;
+  background: var(--primary);
+  opacity: 0.3;
+  border-radius: 1px;
+  transition: height 0.3s ease, opacity 0.3s ease;
+}
+
+.sparkline-bar:hover {
+  opacity: 1;
+}
+
+.dept-badge {
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 9px;
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: -0.025em;
+    border: 1px solid;
+}
+
+.dept-cardiology { background-color: #FEF2F2; color: #DC2626; border-color: #FEE2E2; }
+.dept-neurology { background-color: #F5F3FF; color: #7C3AED; border-color: #EDE9FE; }
+.dept-oncology { background-color: #ECFDF5; color: #059669; border-color: #D1FAE5; }
+.dept-pediatrics { background-color: #FFFBEB; color: #D97706; border-color: #FEF3C7; }

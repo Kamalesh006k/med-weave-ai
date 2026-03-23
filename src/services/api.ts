@@ -14,6 +14,21 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+api.interceptors.response.use(
+  (response) => {
+    return response;
+  },
+  (error) => {
+    if (error.response && error.response.status === 401) {
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('token');
+        window.location.href = '/login';
+      }
+    }
+    return Promise.reject(error);
+  }
+);
+
 export default api;
 
 export const authService = {
@@ -42,6 +57,14 @@ export const patientService = {
   addPatient: async (patient) => {
     const response = await api.post('/add_patient', patient);
     return response.data;
+  },
+  parseIntake: async (note) => {
+    const response = await api.post('/parse_intake', { note });
+    return response.data;
+  },
+  getDailyBriefing: async () => {
+    const response = await api.get('/daily_briefing');
+    return response.data.briefing;
   }
 };
 
@@ -53,5 +76,9 @@ export const consultationService = {
   getHistory: async (patient_id) => {
     const response = await api.get(`/get_history/${patient_id}`);
     return response.data;
+  },
+  chatCopilot: async (patient_id, message) => {
+    const response = await api.post('/chat_copilot', { patient_id, message });
+    return response.data.reply;
   }
 };

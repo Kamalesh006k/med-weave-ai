@@ -89,6 +89,18 @@ def add_patient(patient: schemas.PatientCreate, current_doctor: models.Doctor = 
         medications=patient.medications
     )
 
+@app.post("/parse_intake", response_model=schemas.ParsedIntake)
+def parse_intake(intake: schemas.RawIntake, current_doctor: models.Doctor = Depends(get_current_doctor)):
+    parsed = ai_service.parse_clinical_note(intake.note)
+    # Ensure all required keys exist and provide fallbacks if missing
+    return schemas.ParsedIntake(
+        name=parsed.get("name", "Unknown Patient"),
+        history=parsed.get("history", "No history extracted."),
+        allergies=parsed.get("allergies", "None reported."),
+        medications=parsed.get("medications", "None reported."),
+        department=parsed.get("department", "all")
+    )
+
 @app.get("/get_patients", response_model=List[schemas.Patient])
 def get_patients(current_doctor: models.Doctor = Depends(get_current_doctor), db: Session = Depends(get_db)):
     db_patients = db.query(models.Patient).filter(models.Patient.doctor_id == current_doctor.id).all()
@@ -102,6 +114,24 @@ def get_patients(current_doctor: models.Doctor = Depends(get_current_doctor), db
             medications=security.decrypt_data(p.encrypted_medications)
         ) for p in db_patients
     ]
+
+@app.get("/daily_briefing")
+def get_daily_briefing(current_doctor: models.Doctor = Depends(get_current_doctor), db: Session = Depends(get_db)):
+    db_patients = db.query(models.Patient).filter(models.Patient.doctor_id == current_doctor.id).all()
+    if not db_patients:
+        return {"briefing": "No patients currently in the directory."}
+    
+    # Create a simplified list for the AI
+    minimal_info = ""
+    for p in db_patients:
+        name = security.decrypt_data(p.encrypted_name)
+        meds = security.decrypt_data(p.encrypted_medications)
+        history = security.decrypt_data(p.encrypted_history)
+        minimal_info += f"- {name}: {history[:100]} | Meds: {meds}\n"
+        
+    briefing = ai_service.generate_briefing(minimal_info)
+    return {"briefing": briefing}
+
 
 @app.post("/analyze_consultation", response_model=schemas.Consultation)
 def analyze_consultation(consultation: schemas.ConsultationCreate, current_doctor: models.Doctor = Depends(get_current_doctor), db: Session = Depends(get_db)):
@@ -131,6 +161,25 @@ def analyze_consultation(consultation: schemas.ConsultationCreate, current_docto
 @app.get("/get_history/{patient_id}", response_model=List[schemas.Consultation])
 def get_history(patient_id: int, current_doctor: models.Doctor = Depends(get_current_doctor), db: Session = Depends(get_db)):
     return db.query(models.Consultation).filter(models.Consultation.patient_id == patient_id, models.Consultation.doctor_id == current_doctor.id).all()
+
+@app.post("/chat_copilot")
+def chat_copilot(chat: schemas.ChatMessage, current_doctor: models.Doctor = Depends(get_current_doctor), db: Session = Depends(get_db)):
+    # Fetch patient history
+    patient = db.query(models.Patient).filter(models.Patient.id == chat.patient_id, models.Patient.doctor_id == current_doctor.id).first()
+    if not patient:
+        raise HTTPException(status_code=404, detail="Patient not found")
+    
+    history_text = f"History: {security.decrypt_data(patient.encrypted_history)}\nAllergies: {security.decrypt_data(patient.encrypted_allergies)}\nMedications: {security.decrypt_data(patient.encrypted_medications)}"
+    
+    # Fetch latest consultation summary
+    latest_consultation = db.query(models.Consultation).filter(models.Consultation.patient_id == chat.patient_id).order_by(models.Consultation.created_at.desc()).first()
+    recent_summary = ""
+    if latest_consultation and latest_consultation.ai_analysis:
+        recent_summary = latest_consultation.ai_analysis.get("summary", "")
+
+    # Ask the CoPilot
+    reply = ai_service.chat_with_copilot(history_text, recent_summary, chat.message)
+    return {"reply": reply}
 
 if __name__ == "__main__":
     import uvicorn

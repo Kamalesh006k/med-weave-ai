@@ -1,15 +1,19 @@
 import os
-import google.generativeai as genai
+from openai import OpenAI
 from dotenv import load_dotenv
 import json
 
 load_dotenv()
 
-GEMINI_KEY = os.getenv("GEMINI_API_KEY")
-if GEMINI_KEY:
-    genai.configure(api_key=GEMINI_KEY)
+OPENROUTER_KEY = os.getenv("OPENROUTER_API_KEY")
 
-model = genai.GenerativeModel("gemini-1.5-flash") # or gemini-pro
+client = OpenAI(
+    base_url="https://openrouter.ai/api/v1",
+    api_key=OPENROUTER_KEY,
+) if OPENROUTER_KEY else None
+
+# Use a free, capable model available on OpenRouter
+MODEL = "google/gemini-2.0-flash-exp:free"
 
 PROMPT_TEMPLATE = """
 You are MedWeave AI, a clinical decision support assistant.
@@ -31,7 +35,7 @@ RULES:
 - DO NOT prescribe medication.
 - DO NOT provide a final diagnosis.
 - ONLY provide suggestions and alerts for the doctor to review.
-- Output MUST be in strict JSON format.
+- Output MUST be in strict JSON format with no markdown code fences.
 
 JSON Structure:
 {{
@@ -43,41 +47,104 @@ JSON Structure:
 }}
 """
 
+def _call(prompt: str) -> str:
+    response = client.chat.completions.create(
+        model=MODEL,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return response.choices[0].message.content.strip()
+
 def analyze_consultation(transcript: str, patient_history: str):
-    if not GEMINI_KEY:
+    if not client:
         return {
             "alerts": [{"severity": "LOW", "type": "System", "message": "AI analysis unavailable - check API key"}],
             "summary": "Analysis skipped due to missing configuration.",
             "patient_explanation": "Thank you for sharing your concerns with your doctor today."
         }
-
     try:
-        response = model.generate_content(
-            PROMPT_TEMPLATE.format(history=patient_history, transcript=transcript),
-            generation_config=genai.types.GenerationConfig(
-                response_mime_type="application/json",
-            )
-        )
-        return json.loads(response.text)
+        text = _call(PROMPT_TEMPLATE.format(history=patient_history, transcript=transcript))
+        # Strip markdown fences if present
+        if text.startswith("```"):
+            text = text.split("```")[1]
+            if text.startswith("json"):
+                text = text[4:]
+        return json.loads(text)
     except Exception as e:
         return {
             "alerts": [{"severity": "HIGH", "type": "Error", "message": f"AI analysis failed: {str(e)}"}],
             "summary": "Error during analysis.",
             "patient_explanation": "There was a technical issue processing the consultation notes."
         }
-        }
 
+PROMPT_INTAKE = """
+You are an AI Clinical Assistant. Extract structured information from the following raw clinical note.
+If a field is not clear, leave it empty.
+
+NOTE:
+{note}
+
+Output MUST be in strict JSON format with no markdown code fences.
+
+JSON Structure:
+{{
+  "name": "Extracted full name",
+  "history": "Concise medical history",
+  "allergies": "List of allergies or 'None reported'",
+  "medications": "List of medications or 'None reported'",
+  "department": "Suggest one of: cardiology, neurology, oncology, pediatrics, or all"
+}}
+"""
+
+def parse_clinical_note(note: str):
+    if not client:
+        return {"name": "Unknown", "history": "API Key Missing", "allergies": "", "medications": "", "department": "all"}
     try:
-        response = model.generate_content(
-            PROMPT_TEMPLATE.format(history=patient_history, transcript=transcript),
-            generation_config=genai.types.GenerationConfig(
-                response_mime_type="application/json",
-            )
-        )
-        return json.loads(response.text)
+        text = _call(PROMPT_INTAKE.format(note=note))
+        if text.startswith("```"):
+            text = text.split("```")[1]
+            if text.startswith("json"):
+                text = text[4:]
+        return json.loads(text)
     except Exception as e:
-        return {
-            "alerts": [{"severity": "HIGH", "type": "Error", "message": f"AI analysis failed: {str(e)}"}],
-            "summary": "Error during analysis.",
-            "patient_explanation": "There was a technical issue processing the consultation notes."
-        }
+        return {"name": "Error Parsing", "history": f"Error: {str(e)}", "allergies": "", "medications": "", "department": "all"}
+
+PROMPT_BRIEFING = """
+You are MedWeave AI, a Chief Medical Officer AI. 
+Review this list of patients and their top-level info. 
+Write a short, urgent, professional 2-sentence "Daily Briefing" for the doctor, identifying who needs immediate attention.
+
+PATIENTS:
+{patients_info}
+
+Output ONLY the briefing paragraph. No JSON. No markdown.
+"""
+
+def generate_briefing(patients_info: str):
+    if not client:
+        return "AI Briefing unavailable. Please review patient records manually."
+    try:
+        return _call(PROMPT_BRIEFING.format(patients_info=patients_info))
+    except Exception as e:
+        return f"Could not generate briefing: {str(e)}"
+
+PROMPT_CHAT = """
+You are MedWeave AI Co-Pilot assisting a doctor during a consultation.
+Patient context and history:
+{history}
+
+Recent Diagnostic Synthesis:
+{recent_summary}
+
+Doctor's Question:
+{message}
+
+Provide a concise, professional, evidence-based response. No markdown headers.
+"""
+
+def chat_with_copilot(history_text: str, recent_summary: str, message: str):
+    if not client:
+        return "Co-Pilot is currently offline. Please check your system configuration."
+    try:
+        return _call(PROMPT_CHAT.format(history=history_text, recent_summary=recent_summary, message=message))
+    except Exception as e:
+        return f"Co-Pilot error: {str(e)}"

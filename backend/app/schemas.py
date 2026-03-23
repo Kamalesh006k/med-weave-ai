@@ -15,6 +15,11 @@ class Doctor(DoctorBase):
     class Config:
         from_attributes = True
 
+class ChatMessage(BaseModel):
+    patient_id: int
+    message: str
+
+
 class Token(BaseModel):
     access_token: str
     token_type: str
@@ -30,6 +35,16 @@ class PatientBase(BaseModel):
 
 class PatientCreate(PatientBase):
     pass
+
+class RawIntake(BaseModel):
+    note: str
+
+class ParsedIntake(BaseModel):
+    name: str = ""
+    history: str = ""
+    allergies: str = ""
+    medications: str = ""
+    department: str = "all"
 
 class Patient(BaseModel):
     id: int
