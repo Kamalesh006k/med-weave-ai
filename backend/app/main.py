@@ -261,6 +261,30 @@ def verify_prescription(request: schemas.PrescriptionVerifyRequest, current_doct
         suggestions=res.get("suggestions", "")
     )
 
+@app.post("/medical_coding", response_model=schemas.MedicalCodingResponse)
+def medical_coding(request: schemas.MedicalCodingRequest, current_doctor: models.Doctor = Depends(get_current_doctor)):
+    return ai_service.perform_medical_coding(request.clinical_note)
+
+@app.post("/adjudicate_claim", response_model=schemas.ClaimAdjudicationResponse)
+def adjudicate_claim(request: schemas.ClaimAdjudicationRequest, current_doctor: models.Doctor = Depends(get_current_doctor)):
+    return ai_service.adjudicate_claim(
+        request.patient_id, 
+        request.diagnosis_codes, 
+        request.procedure_codes, 
+        request.authorization, 
+        request.total_claimed_amount, 
+        request.policy_reference
+    )
+
+@app.post("/prior_auth", response_model=schemas.PriorAuthResponse)
+def prior_auth(request: schemas.PriorAuthRequest, current_doctor: models.Doctor = Depends(get_current_doctor), db: Session = Depends(get_db)):
+    patient = db.query(models.Patient).filter(models.Patient.id == request.patient_id, models.Patient.doctor_id == current_doctor.id).first()
+    context = ""
+    if patient:
+        context = f"History: {security.decrypt_data(patient.encrypted_history)} | Meds: {security.decrypt_data(patient.encrypted_medications)}"
+    
+    return ai_service.process_prior_auth(request.requested_service, request.clinical_justification, context)
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

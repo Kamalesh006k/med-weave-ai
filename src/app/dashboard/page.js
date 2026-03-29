@@ -2,14 +2,27 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { patientService, authService } from '@/services/api';
-import { User, Plus, MessageSquare, History, LogOut, Search, Filter, MoreHorizontal, UserPlus, Activity, Zap, ArrowLeft, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { User, Plus, MessageSquare, History, LogOut, Search, Filter, MoreHorizontal, UserPlus, Activity, Zap, ArrowLeft, AlertCircle, CheckCircle2, Briefcase } from 'lucide-react';
 
 const DEPARTMENTS = [
   { id: 'all', name: 'All Departments', color: 'slate' },
   { id: 'cardiology', name: 'Cardiology', color: 'red' },
   { id: 'neurology', name: 'Neurology', color: 'purple' },
   { id: 'oncology', name: 'Oncology', color: 'emerald' },
-  { id: 'pediatrics', name: 'Pediatrics', color: 'amber' }
+  { id: 'pediatrics', name: 'Pediatrics', color: 'amber' },
+  { id: 'opd', name: 'OPD (General Checkup)', color: 'blue' }
+];
+
+const TIME_SLOTS = [
+    '09:00 AM', '09:15 AM', '09:30 AM', '09:45 AM',
+    '10:00 AM', '10:15 AM', '10:30 AM', '10:45 AM',
+    '11:00 AM', '11:15 AM', '11:30 AM', '11:45 AM',
+    '12:00 PM', '12:15 PM', '12:30 PM', '12:45 PM',
+    '01:00 PM', '01:15 PM', '01:30 PM', '01:45 PM',
+    '02:00 PM', '02:15 PM', '02:30 PM', '02:45 PM',
+    '03:00 PM', '03:15 PM', '03:30 PM', '03:45 PM',
+    '04:00 PM', '04:15 PM', '04:30 PM', '04:45 PM',
+    '05:00 PM'
 ];
 
 export default function Dashboard() {
@@ -151,10 +164,9 @@ export default function Dashboard() {
           <h1 className="text-lg font-bold tracking-tight text-slate-900">MedWeave AI</h1>
         </div>
         <div className="flex items-center gap-6">
-          <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-100 rounded-full border border-slate-200">
-            <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-            <span className="text-[10px] font-bold text-slate-600 uppercase tracking-wider">System Active</span>
-          </div>
+          <button onClick={() => router.push('/operations')} className="text-slate-500 hover:text-indigo-600 transition-all flex items-center gap-2 text-sm font-bold uppercase tracking-wider">
+             <Briefcase size={16} /> Operations
+          </button>
           <button onClick={logout} className="text-slate-500 hover:text-red-600 transition-colors flex items-center gap-2 text-sm font-medium">
             <LogOut size={16} /> Logout
           </button>
@@ -201,6 +213,7 @@ export default function Dashboard() {
                     <option value="neurology">Neurology</option>
                     <option value="pediatrics">Pediatrics</option>
                     <option value="oncology">Oncology</option>
+                    <option value="opd">OPD (General)</option>
                 </select>
                 <div className="h-4 w-[1px] bg-slate-200 self-center mx-1" />
                 <button 
@@ -393,13 +406,16 @@ export default function Dashboard() {
 
                <div>
                 <label className="medical-label mb-2 block">Scheduled Appointment Slot</label>
-                <input
-                  type="text"
+                <select
                   value={newPatient.time_slot}
                   onChange={(e) => setNewPatient({ ...newPatient, time_slot: e.target.value })}
                   className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-4 focus:ring-indigo-500/5 focus:border-indigo-500 transition-all font-bold text-slate-700"
-                  placeholder="e.g. 10:30 AM"
-                />
+                >
+                  <option value="">Select a Time...</option>
+                  {TIME_SLOTS.map(time => (
+                      <option key={time} value={time}>{time}</option>
+                  ))}
+                </select>
               </div>
 
                <div className="grid grid-cols-2 gap-4">

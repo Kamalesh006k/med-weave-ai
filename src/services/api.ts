@@ -98,3 +98,18 @@ export const consultationService = {
     return response.data;
   }
 };
+
+export const operationsService = {
+  medicalCoding: async (clinical_note) => {
+    const response = await api.post('/medical_coding', { clinical_note });
+    return response.data;
+  },
+  adjudicateClaim: async (claimData) => {
+    const response = await api.post('/adjudicate_claim', claimData);
+    return response.data;
+  },
+  priorAuth: async (patient_id, requested_service, clinical_justification) => {
+    const response = await api.post('/prior_auth', { patient_id, requested_service, clinical_justification });
+    return response.data;
+  }
+};

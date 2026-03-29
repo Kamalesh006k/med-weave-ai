@@ -93,3 +93,44 @@ class PrescriptionVerifyResponse(BaseModel):
     status: str
     reason: str
     suggestions: Optional[str] = ""
+
+# --- Operations Schemas ---
+
+class MedicalCodingRequest(BaseModel):
+    clinical_note: str
+
+class MedicalCode(BaseModel):
+    code: str
+    description: str
+    type: str # ICD-10 or CPT
+
+class MedicalCodingResponse(BaseModel):
+    codes: List[MedicalCode]
+    reasoning: str
+
+class ClaimAdjudicationRequest(BaseModel):
+    patient_id: str
+    diagnosis_codes: List[str]
+    procedure_codes: List[str]
+    authorization: str # Yes/No
+    total_claimed_amount: float
+    policy_reference: Optional[str] = "BlueCross v4.1"
+
+class ClaimAdjudicationResponse(BaseModel):
+    status: str # Approved / Partially Approved / Rejected / Pending Authorization
+    allowed_amount: float
+    insurance_payable: float
+    patient_responsibility: float
+    remarks: str
+
+class PriorAuthRequest(BaseModel):
+    patient_id: int
+    requested_service: str
+    clinical_justification: str
+
+class PriorAuthResponse(BaseModel):
+    auth_number: Optional[str] = None
+    status: str # AUTHORIZED, DENIED, MORE_INFO_REQUIRED
+    reasoning: str
+    criteria_met: List[str]
+    criteria_failed: List[str]

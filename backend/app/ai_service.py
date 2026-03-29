@@ -2,6 +2,7 @@ import os
 from openai import OpenAI
 from dotenv import load_dotenv
 import json
+from typing import List
 
 load_dotenv()
 
@@ -58,6 +59,8 @@ def _call(prompt: str) -> str:
     response = client.chat.completions.create(
         model=MODEL,
         messages=[{"role": "user", "content": prompt}],
+        max_tokens=1024,
+        temperature=0.0,
     )
     return response.choices[0].message.content.strip()
 
@@ -176,19 +179,11 @@ TASK 1 — SPEAKER DIARIZATION:
 - MAINTAIN speaker label consistency throughout.
 - AUTO-CORRECT grammar, speech recognition artifacts, and minor phrasing errors silently in the diarized output. For example, if the doctor says "years" but clearly means "days" based on context, correct it to "days" in the output WITHOUT raising a warning. This is a speech-to-text system, expect transcription errors.
 
-TASK 2 — CLINICAL SAFETY ALERTS (WARNING):
-ONLY raise a warning for GENUINE PATIENT SAFETY RISKS. These are:
-- **Wrong Medication**: Doctor prescribes a drug the patient is ALLERGIC to, or a drug that dangerously interacts with the patient's current medications.
-- **Missed Critical History**: Doctor ignores or contradicts a KNOWN serious condition from the patient's history (e.g., prescribing blood thinners to a patient with a bleeding disorder).
-- **Dangerous Misdiagnosis**: Doctor's proposed diagnosis is CONTRADICTED by clear symptoms described by the patient (e.g., dismissing chest pain + shortness of breath as anxiety when history shows cardiac risk).
-- **Contraindicated Procedure**: Doctor suggests a test or procedure that is unsafe given the patient's known conditions.
-
-DO NOT WARN FOR:
-- Grammar mistakes or speech-to-text errors (e.g., "years" instead of "days")
-- Minor phrasing issues or casual language
-- The doctor repeating or paraphrasing what the patient said
-- Differences in how timeframes are expressed
-- General conversational flow or bedside manner
+TASK 2 — CLINICAL SAFETY WATCHDOG (WARNING):
+Your primary goal is to PREVENT HARM. Flag any interaction where the doctor's plan is dangerously inadequate or contradicts the patient's symptoms.
+- **Dangerous Misdiagnosis/Dismissal**: Flag when 'Red Flag' symptoms are ignored or attributed to minor causes without proper exclusion (e.g., dismissing sharp Right Lower Quadrant pain as 'acidity' without considering appendicitis).
+- **Inappropriate Medication**: Flag when a minor medication is given for potentially life-threatening symptoms.
+- **Missed Critical Evaluation**: Flag when the doctor refuses or dismisses necessary tests/scans for high-risk symptoms.
 
 Patient Context (Secure ID: {patient_id}):
 {history}
@@ -198,11 +193,10 @@ Current Live Transcript:
 
 OUTPUT RULES:
 - STRICT JSON ONLY.
+- BE PROACTIVE: If you see a potential clinical error, highlight it in the "warning" field.
 - "warning": "[Concise clinical safety alert]" OR "SAFE".
 - "diarized_text": "[Clean, grammar-corrected labeled conversation]".
-- DO NOT use emojis.
-- MAINTAIN CONTINUITY: Do not change previous speaker labels.
-- DEFAULT TO "SAFE" unless there is a CLEAR, DANGEROUS clinical error.
+- NO MARKDOWN FENCES. JUST THE JSON.
 """
 
 def check_realtime(transcript: str, patient_id: str, patient_history: str):
@@ -213,13 +207,20 @@ def check_realtime(transcript: str, patient_id: str, patient_history: str):
                                       .replace("{history}", patient_history) \
                                       .replace("{transcript}", transcript)
         reply = _call(prompt)
+        
         # Robust JSON extraction
-        start = reply.find('{')
-        end = reply.rfind('}') + 1
-        if start != -1 and end != -1:
-            return json.loads(reply[start:end])
-        return {"warning": "SAFE", "diarized_text": transcript}
-    except Exception:
+        try:
+            # First try direct parse
+            return json.loads(reply)
+        except json.JSONDecodeError:
+            # Try to extract the first/main JSON block
+            start = reply.find('{')
+            end = reply.rfind('}') + 1
+            if start != -1 and end != -1:
+                return json.loads(reply[start:end])
+            raise ValueError("No valid JSON found in AI response")
+    except Exception as e:
+        print(f"Realtime check error: {e}")
         return {"warning": "SAFE", "diarized_text": transcript}
 
 PROMPT_PRESCRIPTION_VERIFY = """
@@ -258,3 +259,118 @@ def verify_prescription(prescription: str, history: str, allergies: str, summary
         return json.loads(reply[start:end])
     except Exception as e:
         return {"status": "WARNING", "reason": f"Verification failed: {str(e)}"}
+
+PROMPT_MEDICAL_CODING = """
+You are an expert Medical Coder. Map the following clinical note to ICD-10 and CPT codes.
+CLINICAL NOTE:
+{note}
+
+Output MUST be in strict JSON format.
+{{
+  "codes": [
+    {{ "code": "ICD-10/CPT Code", "description": "Standard Description", "type": "ICD-10|CPT" }}
+  ],
+  "reasoning": "Detailed audit trail/reasoning for each code selected"
+}}
+"""
+
+def perform_medical_coding(note: str):
+    if not client: return {"codes": [], "reasoning": "AI offline."}
+    try:
+        prompt = PROMPT_MEDICAL_CODING.replace("{note}", note)
+        reply = _call(prompt)
+        start = reply.find('{')
+        end = reply.rfind('}') + 1
+        return json.loads(reply[start:end])
+    except Exception as e:
+        return {"codes": [], "reasoning": f"Error: {str(e)}"}
+
+PROMPT_ADJUDICATION = """
+You are a Medical Coding and Insurance Claim Adjudication Assistant.
+Process the following healthcare request following this EXACT 6-STEP WORKFLOW:
+
+STEP 1: Validate Input
+- Check if Patient ID ({patient_id}), Diagnosis Codes ({dx}), and Procedure Codes ({cpt}) are present.
+- Reject if codes are missing or invalid.
+
+STEP 2: Medical Necessity Check
+- Verify if each procedure (CPT) is clinically supported by the diagnosis (ICD-10).
+- Reject if there is no clear clinical relationship.
+
+STEP 3: Prior Authorization
+- If any procedure is high-cost (e.g., MRI, surgery, biologics), check if Authorization ({auth}) is provided.
+- If high-cost but not authorized, mark status as "Pending Authorization".
+
+STEP 4: Apply Payer Policy ({policy})
+- The Allowed Amount should GENERALLY EQUAL the Total Claimed Amount ({claimed}) unless there is a specific policy rule to reduce it.
+- If procedure is high-cost, check for auth as per Step 3.
+
+STEP 5: Adjudication
+- Calculate total allowed amount in Rs.
+- Insurance Payable = Allowed Amount * 0.8 (assuming 80% coverage).
+- Patient Responsibility = Allowed Amount * 0.2 (assuming 20% co-pay).
+
+STEP 6: Final Decision
+Output MUST be in strict JSON format.
+
+JSON Structure:
+{{
+  "status": "Approved | Partially Approved | Rejected | Pending Authorization",
+  "allowed_amount": number,
+  "insurance_payable": number,
+  "patient_responsibility": number,
+  "remarks": "Step-by-step reasoning for the final decision"
+}}
+
+INPUT DATA (All amounts in INR / Rs.):
+Patient ID: {patient_id}
+Diagnosis (ICD-10): {dx}
+Procedures (CPT): {cpt}
+Authorization Provided: {auth}
+Total Claimed Amount (Rs.): {claimed}
+"""
+
+def adjudicate_claim(patient_id: str, dx: List[str], cpt: List[str], auth: str, claimed: float, policy: str):
+    if not client: return {"status": "Rejected", "allowed_amount": 0, "insurance_payable": 0, "patient_responsibility": 0, "remarks": "AI offline."}
+    try:
+        prompt = PROMPT_ADJUDICATION.format(
+            patient_id=patient_id,
+            dx=", ".join(dx),
+            cpt=", ".join(cpt),
+            auth=auth,
+            claimed=claimed,
+            policy=policy
+        )
+        reply = _call(prompt)
+        start = reply.find('{')
+        end = reply.rfind('}') + 1
+        return json.loads(reply[start:end])
+    except Exception as e:
+        return {"status": "Rejected", "allowed_amount": 0, "insurance_payable": 0, "patient_responsibility": 0, "remarks": f"Analysis Error: {str(e)}"}
+
+PROMPT_PRIOR_AUTH = """
+You are a Prior Authorization Specialist. Evaluate this request.
+SERVICE: {service}
+JUSTIFICATION: {justification}
+PATIENT_CONTEXT: {context}
+
+Output MUST be in strict JSON format.
+{{
+  "auth_number": "AUTH-XXXX",
+  "status": "AUTHORIZED|DENIED|MORE_INFO_REQUIRED",
+  "reasoning": "Full rationale with clinical evidence",
+  "criteria_met": ["Clinical criteria met list"],
+  "criteria_failed": ["Clinical criteria failed list"]
+}}
+"""
+
+def process_prior_auth(service: str, justification: str, context: str):
+    if not client: return {"status": "DENIED", "reasoning": "AI offline.", "criteria_met": [], "criteria_failed": []}
+    try:
+        prompt = PROMPT_PRIOR_AUTH.replace("{service}", service).replace("{justification}", justification).replace("{context}", context)
+        reply = _call(prompt)
+        start = reply.find('{')
+        end = reply.rfind('}') + 1
+        return json.loads(reply[start:end])
+    except Exception as e:
+        return {"status": "DENIED", "reasoning": f"Error: {str(e)}", "criteria_met": [], "criteria_failed": []}
