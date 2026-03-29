@@ -1,36 +1,71 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://github.com/vercel/next.js/tree/canary/packages/create-next-app).
+# MedWeave AI
+
+MedWeave AI is a unified healthcare dashboard that handles clinical notes and automated insurance operations. It uses AI agents to help doctors with live consultations, medical coding, and claim adjudication.
 
 ## Getting Started
 
-First, run the development server:
+Follow these steps to set up the project on your local machine. You'll need to run both the backend (Python) and the frontend (Next.js) simultaneously.
 
+### 1. Backend Setup (FastAPI)
+
+Go to the `backend` folder:
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+cd backend
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Create a virtual environment and activate it:
+```bash
+# Windows
+python -m venv venv
+.\venv\Scripts\activate
 
-You can start editing the page by modifying `app/page.js`. The page auto-updates as you edit the file.
+# Mac/Linux
+python3 -m venv venv
+source venv/bin/activate
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Install the required packages:
+```bash
+pip install -r requirements.txt
+```
 
-## Learn More
+Create a `.env` file inside the `backend` folder and add your Gemini API key:
+```env
+GEMINI_API_KEY=your_google_ai_studio_key_here
+```
 
-To learn more about Next.js, take a look at the following resources:
+Start the backend server:
+```bash
+uvicorn app.main:app --reload
+```
+The backend will run on `http://127.0.0.1:8000`.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+---
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+### 2. Frontend Setup (Next.js)
 
-## Deploy on Vercel
+Open a new terminal window at the project root:
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Install dependencies:
+```bash
+npm install
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Run the development server:
+```bash
+npm run dev
+```
+The frontend will be available at `http://localhost:3000`.
+
+## Initial Login
+
+Once both servers are running, you can log in using these default credentials:
+- **Email**: `doctor@medweave.ai`
+- **Password**: `password123`
+
+## Documentation
+
+For more detailed information on how the system works, check out these files:
+- `architecture_document.md`: For technical implementation details.
+- `impact_model.md`: For business and ROI analysis.
+- `hackathon_report.md`: For the project pitch and innovation summary.
